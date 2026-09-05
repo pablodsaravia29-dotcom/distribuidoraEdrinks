@@ -590,20 +590,22 @@ async function loadFromSheets() {
       setStatus('ok',d.url);
       let products=d.products;
       if(Array.isArray(products)){const obj={};products.forEach(p=>{const k=(p.nombre||p.displayName||'').toLowerCase().trim();if(k)obj[k]={...p,nombre:p.nombre||p.displayName||''};});products=obj;}
-      if(products&&Object.keys(products).length){
-        D.products=products;
-        if(d.invoices&&Array.isArray(d.invoices))D.invoices=d.invoices;
-        if(d.variaciones&&Array.isArray(d.variaciones))D.variaciones=d.variaciones;
-        lsSave();return true;
-      }
+      let updated=false;
+      if(products&&Object.keys(products).length){D.products=products;updated=true;}
+      if(d.invoices&&Array.isArray(d.invoices)&&d.invoices.length){D.invoices=d.invoices;updated=true;}
+      if(d.variaciones&&Array.isArray(d.variaciones)&&d.variaciones.length){D.variaciones=d.variaciones;updated=true;}
+      if(updated){lsSave();return true;}
     }else setStatus('err');
   }catch(e){setStatus('err');}
   return false;
 }
 
-async function syncToSheets(invoice,items){
+async function syncToSheets(invoice,items,newVariaciones){
   try{
-    const res=await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({action:'save',invoice,items,variaciones:D.variaciones})});
+    const res=await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({
+      action:'save',invoice,items,
+      variaciones: newVariaciones||[]
+    })});
     const d=await res.json();if(d.ok)setStatus('ok',d.url);else setStatus('err');
   }catch(e){setStatus('err');}
 }
@@ -717,10 +719,11 @@ async function processAll(){
       if(!D.invoices.find(i=>i.id===invoice.id))
         D.invoices.push({...invoice,items,newProds,ups,downs});
       lsSave();renderAll();
+      const newVars=items.filter(it=>it.status==='up'||it.status==='down').map(it=>({fecha:invoice.fecha,producto:it.nombre,proveedor:invoice.proveedor,prevPrecio:it.prevPrecio||0,precio:it.precio,pct:it.prevPrecio?((it.precio-it.prevPrecio)/it.prevPrecio*100):0,tipo:it.status,factura:invoice.id}));
       let txt=`✅ ${invoice.id} — ${invoice.proveedor} (${invoice.fecha}) · $${invoice.total.toFixed(2)}`;
       txt+=invoice.totalOk?'\n✅ Validación OK':`\n⚠️ Calculado $${invoice.calcTotal.toFixed(2)} vs $${invoice.total.toFixed(2)}`;
       addMsg('bot',txt,{newProds,ups,downs});
-      syncToSheets(invoice,items);
+      syncToSheets(invoice,items,newVars);
     }catch(e){addMsg('bot',`❌ Error en ${file.name}: ${e.message}`);}
   }
   D.queue=[];document.getElementById('queue').innerHTML='';document.getElementById('fileInput').value='';
