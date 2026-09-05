@@ -600,6 +600,21 @@ async function loadFromSheets() {
   return false;
 }
 
+async function syncOneToSheets(invoice, items){
+  // Guarda UNA factura y espera respuesta antes de continuar
+  try{
+    const vars = D.variaciones.filter(v=>v.factura===invoice.id);
+    const res = await fetch(SHEETS_URL, {method:'POST', body:JSON.stringify({
+      action: 'save',
+      invoice, items,
+      variaciones: vars
+    })});
+    const d = await res.json();
+    if(d.ok){ setStatus('ok', d.url); return true; }
+    else{ console.warn('Sheets error:', d.error); return false; }
+  }catch(e){ console.warn('Sheets fetch error:', e); return false; }
+}
+
 async function syncBatchToSheets(batchItems){
   try{
     // Recolectar todas las variaciones nuevas
@@ -742,11 +757,16 @@ async function processAll(){
       addMsg('bot',txt,{newProds,ups,downs});
     }catch(e){addMsg('bot',`❌ Error en ${file.name}: ${e.message}`);}
   }
-  // Guardar todo junto en un solo llamado a Sheets
+  // Guardar en Sheets de a una, esperando cada una
   lsSave();renderAll();
   if(batchItems.length>0){
     addMsg('bot',`⏳ Guardando ${batchItems.length} factura(s) en Sheets...`);
-    await syncBatchToSheets(batchItems);
+    let guardadas=0;
+    for(const b of batchItems){
+      const ok=await syncOneToSheets(b.invoice,b.items);
+      if(ok)guardadas++;
+    }
+    addMsg('bot',`✅ ${guardadas}/${batchItems.length} factura(s) guardadas en Sheets.`);
   }
   D.queue=[];document.getElementById('queue').innerHTML='';document.getElementById('fileInput').value='';
   D.busy=false;document.getElementById('procBtn').disabled=true;
