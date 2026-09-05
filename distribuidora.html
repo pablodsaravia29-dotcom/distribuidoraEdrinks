@@ -716,8 +716,10 @@ async function processAll(){
           D.variaciones.push({fecha:invoice.fecha,producto:it.nombre,proveedor:invoice.proveedor,prevPrecio:prevPrecio||0,precio:it.precio,pct:prevPrecio?((it.precio-prevPrecio)/prevPrecio*100):0,tipo:status,factura:invoice.id});
         }
       });
-      if(!D.invoices.find(i=>i.id===invoice.id))
+      if(!D.invoices.find(i=>i.id===invoice.id)){
+        // Guardar versión completa en memoria local para mostrar ítems en esta sesión
         D.invoices.push({...invoice,items,newProds,ups,downs});
+      }
       lsSave();renderAll();
       const newVars=items.filter(it=>it.status==='up'||it.status==='down').map(it=>({fecha:invoice.fecha,producto:it.nombre,proveedor:invoice.proveedor,prevPrecio:it.prevPrecio||0,precio:it.precio,pct:it.prevPrecio?((it.precio-it.prevPrecio)/it.prevPrecio*100):0,tipo:it.status,factura:invoice.id}));
       let txt=`✅ ${invoice.id} — ${invoice.proveedor} (${invoice.fecha}) · $${invoice.total.toFixed(2)}`;
@@ -1060,19 +1062,24 @@ function renderHist(){
   document.getElementById('histCount').textContent='('+D.invoices.length+')';
   const el=document.getElementById('histScroll');
   if(!invs.length){el.innerHTML='<div class="empty" style="margin-top:24px">Sin facturas aún.</div>';return;}
-  el.innerHTML=invs.map(inv=>`
-    <div class="inv-card fi">
+  el.innerHTML=invs.map(inv=>{
+    const hasItems = inv.items && inv.items.length > 0;
+    const itemsHtml = hasItems ? (inv.items||[]).map(it=>{
+      const cls={new:'b-new',up:'b-up',down:'b-dn',same:'b-same'}[it.status]||'b-same';
+      const lbl={new:'✦',up:`↑$${(it.prevPrecio||0).toFixed(0)}`,down:`↓$${(it.prevPrecio||0).toFixed(0)}`,same:''}[it.status]||'';
+      return `<div class="inv-row"><span class="inv-nombre">${it.nombre}</span><span class="inv-qty">x${it.cantidad}</span><span class="inv-precio">$${it.precio.toFixed(2)}</span>${lbl?`<span class="badge ${cls}">${lbl}</span>`:''}</div>`;
+    }).join('') : `<div style="padding:6px 14px;font-size:11px;color:var(--muted)">
+      ${inv.itemCount||0} producto(s) · ${inv.newProdsCount||0} nuevo(s) · ${inv.upsCount||0} aumento(s) · ${inv.downsCount||0} baja(s)
+    </div>`;
+    return `<div class="inv-card fi">
       <div class="inv-hdr">
         <div><div class="inv-prov">🏭 ${inv.proveedor}</div><div class="inv-meta">📅 ${inv.fecha} · ${inv.id}</div></div>
-        <div class="inv-total">$${inv.total.toFixed(2)}</div>
+        <div class="inv-total">$${(inv.total||0).toFixed(2)}</div>
       </div>
-      <div class="inv-body">${(inv.items||[]).map(it=>{
-        const cls={new:'b-new',up:'b-up',down:'b-dn',same:'b-same'}[it.status]||'b-same';
-        const lbl={new:'✦',up:`↑$${(it.prevPrecio||0).toFixed(0)}`,down:`↓$${(it.prevPrecio||0).toFixed(0)}`,same:''}[it.status]||'';
-        return `<div class="inv-row"><span class="inv-nombre">${it.nombre}</span><span class="inv-qty">x${it.cantidad}</span><span class="inv-precio">$${it.precio.toFixed(2)}</span>${lbl?`<span class="badge ${cls}">${lbl}</span>`:''}</div>`;
-      }).join('')}</div>
-      <div class="inv-foot ${inv.totalOk?'val-ok':'val-fail'}">${inv.totalOk?'✅ Validación OK':`⚠️ Calculado $${inv.calcTotal?.toFixed(2)} vs $${inv.total.toFixed(2)}`}</div>
-    </div>`).join('');
+      <div class="inv-body">${itemsHtml}</div>
+      <div class="inv-foot ${inv.totalOk?'val-ok':'val-fail'}">${inv.totalOk?'✅ Validación OK':`⚠️ Calculado $${inv.calcTotal?.toFixed(2)} vs $${(inv.total||0).toFixed(2)}`}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderProdTable(){
