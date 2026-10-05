@@ -270,6 +270,7 @@ table.provt tbody tr.selected td{background:#dcfce7;}
 .hint{background:var(--surf);border:1px solid var(--border);border-radius:8px;padding:7px 12px;font-size:12px;cursor:pointer;text-align:left;color:var(--txt);}
 .hint:hover{border-color:var(--accent);}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -1500,7 +1501,7 @@ async function cargarExcel(e){
   document.getElementById('impStatusTxt').textContent = '⏳ Leyendo Excel...';
   try{
     const buf = await file.arrayBuffer();
-    const XLSX = await import('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/xlsx.mjs');
+    // Usar XLSX global cargado desde cdnjs
     const wb = XLSX.read(buf, {type:'array', cellDates:true});
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
