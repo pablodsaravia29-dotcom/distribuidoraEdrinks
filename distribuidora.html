@@ -642,7 +642,15 @@ table.provt tbody tr.selected td{background:#dcfce7;}
   <div class="modal">
     <h2 id="modalTitle">Producto</h2>
     <div class="mf"><label>Nombre</label><input id="mNombre" type="text" placeholder="Nombre del producto"></div>
-    <div class="mf"><label>Proveedor</label><input id="mProveedor" type="text" placeholder="Proveedor"></div>
+    <div class="mf"><label>Proveedor</label>
+      <select id="mProveedor" onchange="onProveedorSelectChange()">
+        <option value="">— Seleccionar proveedor —</option>
+      </select>
+    </div>
+    <div class="mf" id="mNuevoProvWrap" style="display:none">
+      <label>Nombre del nuevo proveedor</label>
+      <input id="mNuevoProvNombre" type="text" placeholder="Ej: Distribuidora XYZ">
+    </div>
     <div class="mf"><label>Precio c/IVA ($)</label><input id="mPrecio" type="number" step="0.01" min="0"></div>
     <div class="mf"><label>IVA</label><select id="mIva"><option value="IVA 22%">IVA 22%</option><option value="IVA 10%">IVA 10%</option><option value="Sin IVA">Sin IVA</option></select></div>
     <div class="mf"><label>Nota (opcional)</label><input id="mNota" type="text" placeholder="Ej: Precio de oferta puntual"></div>
@@ -761,6 +769,13 @@ async function loadFromSheets() {
       if(products&&Object.keys(products).length){D.products=products;updated=true;}
       if(d.invoices&&Array.isArray(d.invoices)&&d.invoices.length){D.invoices=d.invoices;updated=true;}
       if(d.variaciones&&Array.isArray(d.variaciones)&&d.variaciones.length){D.variaciones=d.variaciones;updated=true;}
+      if(d.proveedores&&Array.isArray(d.proveedores)&&d.proveedores.length){
+        // Merge: mantener proveedores locales si Sheets trae más o iguales
+        if(d.proveedores.length>=proveedores.length){
+          proveedores=d.proveedores;lsSaveProveedores();
+        }
+        updated=true;
+      }
       if(updated){lsSave();return true;}
     }else setStatus('err');
   }catch(e){setStatus('err');}
@@ -943,12 +958,36 @@ async function processAll(){
 // ═══════════════════════════════════════════════════════
 // MODAL EDITAR/AGREGAR
 // ═══════════════════════════════════════════════════════
+function fillProveedorSelect(selectedName){
+  const sel=document.getElementById('mProveedor');
+  sel.innerHTML='<option value="">— Seleccionar proveedor —</option>';
+  proveedores.slice().sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).forEach(p=>{
+    const opt=document.createElement('option');
+    opt.value=p.nombre;
+    opt.textContent=p.nombre+(p.tipo==='cfe'?' (CFE)':' (Manual)');
+    if(p.nombre===selectedName)opt.selected=true;
+    sel.appendChild(opt);
+  });
+  const newOpt=document.createElement('option');
+  newOpt.value='__nuevo__';
+  newOpt.textContent='➕ Nuevo proveedor...';
+  sel.appendChild(newOpt);
+  document.getElementById('mNuevoProvWrap').style.display='none';
+  document.getElementById('mNuevoProvNombre').value='';
+}
+function onProveedorSelectChange(){
+  const sel=document.getElementById('mProveedor');
+  document.getElementById('mNuevoProvWrap').style.display=(sel.value==='__nuevo__')?'block':'none';
+  if(sel.value==='__nuevo__') setTimeout(()=>document.getElementById('mNuevoProvNombre').focus(),50);
+}
 function openAddModal(){
   modalMode='add';modalKey=null;
   document.getElementById('modalTitle').textContent='➕ Agregar producto';
-  ['mNombre','mProveedor','mNota'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('mNombre').value='';
+  document.getElementById('mNota').value='';
   document.getElementById('mPrecio').value='';document.getElementById('mIva').value='IVA 22%';
   document.getElementById('mNombre').disabled=false;
+  fillProveedorSelect('');
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(()=>document.getElementById('mNombre').focus(),80);
 }
@@ -958,10 +997,10 @@ function openEditModalByKey(btn){
   modalMode='edit';modalKey=key;
   document.getElementById('modalTitle').textContent='✏️ Editar producto';
   document.getElementById('mNombre').value=p.nombre;document.getElementById('mNombre').disabled=true;
-  document.getElementById('mProveedor').value=p.proveedor||'';
   document.getElementById('mPrecio').value=p.precio;
   document.getElementById('mIva').value=p.ivaLabel||'IVA 22%';
   document.getElementById('mNota').value=p.nota||'';
+  fillProveedorSelect(p.proveedor||'');
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(()=>document.getElementById('mPrecio').focus(),80);
 }
@@ -973,21 +1012,39 @@ function confirmDeleteByKey(btn){
   addMsg('bot',`🗑 Eliminado: ${p.nombre}`);
 }
 function closeModal(){document.getElementById('modalOverlay').classList.remove('open');}
-function saveModal(){
+async function saveModal(){
   const nombre=document.getElementById('mNombre').value.trim();
-  const proveedor=document.getElementById('mProveedor').value.trim();
+  const selVal=document.getElementById('mProveedor').value;
   const precio=parseFloat(document.getElementById('mPrecio').value);
   const ivaLabel=document.getElementById('mIva').value;
   const nota=document.getElementById('mNota').value.trim();
   if(!nombre){alert('El nombre es obligatorio.');return;}
   if(isNaN(precio)||precio<0){alert('Precio inválido.');return;}
+
+  // Resolver proveedor: puede ser existente, nuevo o vacío
+  let proveedor='';
+  if(selVal==='__nuevo__'){
+    const nuevoNombre=document.getElementById('mNuevoProvNombre').value.trim();
+    if(!nuevoNombre){alert('Ingresá el nombre del nuevo proveedor.');return;}
+    proveedor=nuevoNombre;
+    // Crear proveedor si no existe
+    if(!proveedores.find(p=>p.nombre.toLowerCase()===proveedor.toLowerCase())){
+      proveedores.push({nombre:proveedor,rut:'',tipo:'manual',iva:'Mixto',notas:''});
+      lsSaveProveedores();renderProveedores();populateProveedorSelect();
+    }
+  }else{
+    proveedor=selVal;
+  }
+
   const today=new Date().toISOString().split('T')[0];
+  let updatedProduct=null;
   if(modalMode==='add'){
     const key=norm(nombre);const prev=D.products[key];
     const history=prev?[...(prev.history||[])]:[];
     history.push({precio,fecha:today,factura:'MANUAL',proveedor});
     const status=prev?(precio>prev.precio+0.01?'up':precio<prev.precio-0.01?'down':'same'):'new';
-    D.products[key]={nombre,cod:'',precio,ivaLabel,dscPct:0,proveedor:proveedor||'Manual',fechaActualizacion:today,ultimaFactura:'MANUAL',status,nota,history};
+    updatedProduct={nombre,cod:'',precio,ivaLabel,dscPct:0,proveedor:proveedor||'Manual',fechaActualizacion:today,ultimaFactura:'MANUAL',status,nota,history};
+    D.products[key]=updatedProduct;
     addMsg('bot',`✅ Agregado: ${nombre} — $${precio.toFixed(2)}${nota?' ('+nota+')':''}`);
   }else{
     const p=D.products[modalKey];const prev=p.precio;
@@ -995,11 +1052,26 @@ function saveModal(){
     history.push({precio,fecha:today,factura:nota?`MANUAL (${nota})`:'MANUAL',proveedor:proveedor||p.proveedor});
     const status=precio>prev+0.01?'up':precio<prev-0.01?'down':'same';
     if(status==='up'||status==='down')D.variaciones.push({fecha:today,producto:p.nombre,proveedor:proveedor||p.proveedor,prevPrecio:prev,precio,pct:((precio-prev)/prev*100),tipo:status,factura:'MANUAL'});
-    D.products[modalKey]={...p,precio,ivaLabel,proveedor:proveedor||p.proveedor,fechaActualizacion:today,ultimaFactura:nota?`MANUAL (${nota})`:'MANUAL EDIT',status,nota,history};
+    updatedProduct={...p,precio,ivaLabel,proveedor:proveedor||p.proveedor,fechaActualizacion:today,ultimaFactura:nota?`MANUAL (${nota})`:'MANUAL EDIT',status,nota,history};
+    D.products[modalKey]=updatedProduct;
     const pct=prev>0?((precio-prev)/prev*100).toFixed(1):null;
     addMsg('bot',`✅ Actualizado: ${p.nombre} $${prev.toFixed(2)}→$${precio.toFixed(2)}${pct?` (${parseFloat(pct)>0?'+':''}${pct}%)`:''}`);
   }
   closeModal();lsSave();renderAll();
+
+  // Sincronizar con Sheets
+  const key=modalMode==='add'?norm(nombre):modalKey;
+  const productsToSync={[key]:updatedProduct};
+  try{
+    setStatus('sync');
+    const res=await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({
+      action:'save_products',
+      products:productsToSync,
+      proveedores
+    })});
+    const d=await res.json();
+    if(d.ok){setStatus('ok',d.url);}else{setStatus('err');console.warn('save_products error:',d.error);}
+  }catch(e){setStatus('err');console.warn('save_products fetch error:',e);}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1454,6 +1526,7 @@ function guardarProveedor(){
     proveedores.push(obj);
   }
   lsSaveProveedores(); renderProveedores(); populateProveedorSelect();
+  syncProveedoresToSheets();
   document.getElementById('provFormMsg').textContent='✅ Guardado.';
   setTimeout(resetProvForm, 1200);
 }
@@ -1462,6 +1535,13 @@ function borrarProveedor(idx){
   if(!confirm('¿Borrar "'+proveedores[idx].nombre+'"?')) return;
   proveedores.splice(idx,1);
   lsSaveProveedores(); renderProveedores(); populateProveedorSelect();
+  syncProveedoresToSheets();
+}
+
+async function syncProveedoresToSheets(){
+  try{
+    await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({action:'save_products',products:{},proveedores})});
+  }catch(e){console.warn('syncProveedores error:',e);}
 }
 
 function resetProvForm(){
