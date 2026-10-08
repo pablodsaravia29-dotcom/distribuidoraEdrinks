@@ -770,11 +770,25 @@ async function loadFromSheets() {
       if(d.invoices&&Array.isArray(d.invoices)&&d.invoices.length){D.invoices=d.invoices;updated=true;}
       if(d.variaciones&&Array.isArray(d.variaciones)&&d.variaciones.length){D.variaciones=d.variaciones;updated=true;}
       if(d.proveedores&&Array.isArray(d.proveedores)&&d.proveedores.length){
-        // Merge: mantener proveedores locales si Sheets trae más o iguales
+        // Merge: Sheets gana si trae igual o más
         if(d.proveedores.length>=proveedores.length){
           proveedores=d.proveedores;lsSaveProveedores();
         }
         updated=true;
+      }
+      // Extraer proveedores únicos de los productos cargados (los CFE que llegaron via factura)
+      if(products&&Object.keys(products).length){
+        let addedNew=false;
+        Object.values(products).forEach(p=>{
+          const nom=(p.proveedor||'').trim();
+          if(!nom)return;
+          const key=nom.toLowerCase();
+          if(!proveedores.find(x=>x.nombre.toLowerCase().trim()===key)){
+            proveedores.push({nombre:nom,rut:'',tipo:'cfe',iva:'Mixto',notas:''});
+            addedNew=true;
+          }
+        });
+        if(addedNew){lsSaveProveedores();syncProveedoresToSheets();}
       }
       if(updated){lsSave();return true;}
     }else setStatus('err');
@@ -1062,11 +1076,15 @@ async function saveModal(){
   // Sincronizar con Sheets
   const key=modalMode==='add'?norm(nombre):modalKey;
   const productsToSync={[key]:updatedProduct};
+  // Variaciones generadas en esta edición (las que tienen factura MANUAL y fecha de hoy)
+  const today2=new Date().toISOString().split('T')[0];
+  const newVars=D.variaciones.filter(v=>v.factura&&v.factura.startsWith('MANUAL')&&v.fecha===today2&&v.producto===updatedProduct.nombre);
   try{
     setStatus('sync');
     const res=await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({
       action:'save_products',
       products:productsToSync,
+      variaciones:newVars,
       proveedores
     })});
     const d=await res.json();
@@ -1470,6 +1488,8 @@ function ensureProveedor(nombre, tipo='cfe'){
     lsSaveProveedores();
     renderProveedores();
     populateProveedorSelect();
+    // Subir a Sheets para que otros dispositivos lo vean
+    syncProveedoresToSheets();
   }
 }
 
