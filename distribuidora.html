@@ -1052,44 +1052,54 @@ async function saveModal(){
 
   const today=new Date().toISOString().split('T')[0];
   let updatedProduct=null;
+  let syncKey='';
+  let newVars=[];  // variaciones a sincronizar, capturadas acá mismo
+
   if(modalMode==='add'){
-    const key=norm(nombre);const prev=D.products[key];
+    syncKey=norm(nombre);
+    const prev=D.products[syncKey];
     const history=prev?[...(prev.history||[])]:[];
     history.push({precio,fecha:today,factura:'MANUAL',proveedor});
     const status=prev?(precio>prev.precio+0.01?'up':precio<prev.precio-0.01?'down':'same'):'new';
     updatedProduct={nombre,cod:'',precio,ivaLabel,dscPct:0,proveedor:proveedor||'Manual',fechaActualizacion:today,ultimaFactura:'MANUAL',status,nota,history};
-    D.products[key]=updatedProduct;
+    D.products[syncKey]=updatedProduct;
+    // Si era existente y cambió precio, registrar variación
+    if(prev&&(status==='up'||status==='down')){
+      const v={fecha:today,producto:nombre,proveedor:proveedor||'Manual',prevPrecio:prev.precio,precio,pct:((precio-prev.precio)/prev.precio*100),tipo:status,factura:'MANUAL'};
+      D.variaciones.push(v);
+      newVars=[v];
+    }
     addMsg('bot',`✅ Agregado: ${nombre} — $${precio.toFixed(2)}${nota?' ('+nota+')':''}`);
   }else{
-    const p=D.products[modalKey];const prev=p.precio;
+    syncKey=modalKey;
+    const p=D.products[modalKey];
+    const prevPrecio=p.precio;
     const history=[...(p.history||[])].slice(-9);
-    history.push({precio,fecha:today,factura:nota?`MANUAL (${nota})`:'MANUAL',proveedor:proveedor||p.proveedor});
-    const status=precio>prev+0.01?'up':precio<prev-0.01?'down':'same';
-    if(status==='up'||status==='down')D.variaciones.push({fecha:today,producto:p.nombre,proveedor:proveedor||p.proveedor,prevPrecio:prev,precio,pct:((precio-prev)/prev*100),tipo:status,factura:'MANUAL'});
-    updatedProduct={...p,precio,ivaLabel,proveedor:proveedor||p.proveedor,fechaActualizacion:today,ultimaFactura:nota?`MANUAL (${nota})`:'MANUAL EDIT',status,nota,history};
+    const facturaLabel=nota?`MANUAL (${nota})`:'MANUAL';
+    history.push({precio,fecha:today,factura:facturaLabel,proveedor:proveedor||p.proveedor});
+    const status=precio>prevPrecio+0.01?'up':precio<prevPrecio-0.01?'down':'same';
+    if(status==='up'||status==='down'){
+      const v={fecha:today,producto:p.nombre,proveedor:proveedor||p.proveedor,prevPrecio,precio,pct:((precio-prevPrecio)/prevPrecio*100),tipo:status,factura:'MANUAL'};
+      D.variaciones.push(v);
+      newVars=[v];
+    }
+    updatedProduct={...p,precio,ivaLabel,proveedor:proveedor||p.proveedor,fechaActualizacion:today,ultimaFactura:facturaLabel,status,nota,history};
     D.products[modalKey]=updatedProduct;
-    const pct=prev>0?((precio-prev)/prev*100).toFixed(1):null;
-    addMsg('bot',`✅ Actualizado: ${p.nombre} $${prev.toFixed(2)}→$${precio.toFixed(2)}${pct?` (${parseFloat(pct)>0?'+':''}${pct}%)`:''}`);
+    const pct=prevPrecio>0?((precio-prevPrecio)/prevPrecio*100).toFixed(1):null;
+    addMsg('bot',`✅ Actualizado: ${p.nombre} $${prevPrecio.toFixed(2)}→$${precio.toFixed(2)}${pct?` (${parseFloat(pct)>0?'+':''}${pct}%)`:''}`);
   }
   closeModal();lsSave();renderAll();
 
   // Sincronizar con Sheets
-  const key=modalMode==='add'?norm(nombre):modalKey;
-  const productsToSync={[key]:updatedProduct};
-  // Variaciones generadas en esta edición (las que tienen factura MANUAL y fecha de hoy)
-  const today2=new Date().toISOString().split('T')[0];
-  const newVars=D.variaciones.filter(v=>v.factura&&v.factura.startsWith('MANUAL')&&v.fecha===today2&&v.producto===updatedProduct.nombre);
+  const productsToSync={[syncKey]:updatedProduct};
   try{
     setStatus('sync');
-    const res=await fetch(SHEETS_URL,{method:'POST',body:JSON.stringify({
-      action:'save_products',
-      products:productsToSync,
-      variaciones:newVars,
-      proveedores
-    })});
+    const body=JSON.stringify({action:'save_products',products:productsToSync,variaciones:newVars,proveedores});
+    const res=await fetch(SHEETS_URL,{method:'POST',body});
     const d=await res.json();
-    if(d.ok){setStatus('ok',d.url);}else{setStatus('err');console.warn('save_products error:',d.error);}
-  }catch(e){setStatus('err');console.warn('save_products fetch error:',e);}
+    if(d.ok){setStatus('ok',d.url);}
+    else{setStatus('err');console.warn('save_products error:',d.error);addMsg('bot','⚠️ Error al guardar en Sheets: '+d.error);}
+  }catch(e){setStatus('err');console.warn('save_products fetch error:',e);addMsg('bot','⚠️ Sin conexión a Sheets al guardar.');}
 }
 
 // ═══════════════════════════════════════════════════════
